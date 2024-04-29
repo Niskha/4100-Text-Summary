@@ -1,152 +1,117 @@
-#  Write a program in any language of your choice that will read a text file (or text input from keyboard).
-#  The text entry/file must contain at least 500 words.
+"""
+Functions for Text Summary App
+"""
+from scipy.stats import norm
+import math
 
 
-# Title: Programming Assignment
-# Author: Denys Kupyna
-# Date: 2/14/2024
-import Programming_Assignment as p
-
-text_file_name = ''
-raw_array = []
-
-
-def error_box(string):
-    p.tkinter.messagebox.showerror(title='Error', message=string)
+# Load the common words file list
+def load_common_words(file_path):
+    # Load common words from a file into a set
+    with open(file_path, 'r') as file:
+        common_words = {line.strip().lower() for line in file}
+    return common_words
 
 
-def set_text(array, t_text):
-    # set text logic
-    word = t_text.split()
-    raw_array.clear()
-    raw_array.append(t_text)
-    array.append(word)
-    wc = word_count(array)
-    # if word count is below 500 send an error box and empty the array
-    if wc < 500:
-        error_box("Word count must be above 500\nCurrent word count: " + str(wc))
-        array.clear()
-    # logging/debugging
-    print("Clean array:\t")
-    print(array)
-    print("Raw array:\t")
-    print(raw_array)
+# Load the text file to be analyzed
+def load_text_file(file_path):
+    # Read the content of the text file
+    with open(file_path, 'r', encoding='utf-8') as file:
+        text = file.read()
+    return text
 
-def set_text_file(array, t_text):
-    # file io for setting text
-    array.clear()
-    t_text.delete('1.0', 'end')
-    filetypes = (
-        ('text files', '*.txt'),
-        ('all files', "*.*")
-    )
-    filename = p.fd.askopenfilename(
-        title='Open file',
-        initialdir='/',
-        filetypes=filetypes
-    )
-    if filename == "":
-        p.si(title='File not found', message='Error: file not found')
+
+# Count the words in the text file
+def count_words(text):
+    # Split the text into words using whitespace as delimiter
+    words = text.split()
+    return len(words)
+
+
+# Count the paragraphs in the text file
+def count_paragraphs(text):
+    # Split the text into paragraphs based on blank lines
+    paragraphs = text.split('\n\n')
+    # Filter out empty paragraphs that might occur from consecutive blank lines
+    paragraphs = [para for para in paragraphs if para.strip()]
+    return len(paragraphs)
+
+
+# Use the count_words() and count_paragraphs() functions on a specific file
+def analyze_text_file(file_path):
+    with open(file_path, 'r') as f:
+        text = f.read()
+
+    # Count words and paragraphs
+    word_count = count_words(text)
+    paragraph_count = count_paragraphs(text)
+
+    return word_count, paragraph_count
+
+
+# Count the hits of the text file to the wordlists, used in calculate_language_score()
+def count_matches(text, wordlist):
+    # Split the text into words
+    words = text.lower().split()
+    # Count words that match any in the wordlist
+    return sum(1 for word in words if word in wordlist)
+
+
+# Determine the language. This is done by calculating
+# english_count(for every word in the text that matches the english wordlist this is incremented)/known_word_count
+# (words that are in either language lists) same for spanish_score/known_word_count, whichever is greater is selected
+# as the language of the text
+def calculate_language_score(text, english_words, spanish_words):
+    # Count English and Spanish matches
+    english_count = count_matches(text, english_words)
+    spanish_count = count_matches(text, spanish_words)
+
+    # Calculate known word count
+    known_word_count = english_count + spanish_count
+
+    # If there are no known words, can't determine
+    if known_word_count == 0:
+        return -1, 0, 0, 0
+
+    # Calculate scores
+    english_score = english_count / known_word_count
+    spanish_score = spanish_count / known_word_count
+
+    # Determine which score is greater
+    if english_score > spanish_score:
+        return 0, english_score, spanish_score, known_word_count
+    elif spanish_score > english_score:
+        return 1, english_score, spanish_score, known_word_count
     else:
-        p.si(title='File Search',
-             message=("Selected file:\n" + filename)
-             )
-    global text_file_name
-    text_file_name = filename
-    try:
-        with open(text_file_name, 'r') as file:
-            for line in file:
-                word = line.split()
-                array = array + word
-                global raw_array
-                raw_array.append(line)
-    except FileNotFoundError:
-        print("File not found or not selected.")
-    if array:
-        for i in reversed(range(len(array))):
-            t_text.insert(1.0, array[i]+" ")
+        return -1, english_score, spanish_score, known_word_count
 
 
-# returns an int
-def word_count(array):
-    wordcount = 0
-    if array[0]:
-        wordcount = len(array[0])
-    return wordcount
+# Calculate the confidence intervals for
+def wilson_confidence_interval(p, n, confidence_level=0.95):
+    # Calculate z-score for the given confidence level
+    z = norm.ppf((1 + confidence_level) / 2)
+
+    # Wilson's formula
+    denominator = 1 + z**2 / n
+    center = (p + z**2 / (2 * n)) / denominator
+    margin = z * math.sqrt(p * (1 - p) / n + z**2 / (4 * n**2)) / denominator
+
+    lower_bound = center - margin
+    upper_bound = center + margin
+
+    return lower_bound, upper_bound
 
 
-# returns an int
-def count_whitespace(array):
-    count = 0
-    for line in array:
-        count = count + line.count(" ")
-    return count
+def calculate_confidence_intervals(english_score, spanish_score, known_word_count, confidence_level=0.95):
+    # Calculate confidence intervals for English and Spanish scores
+    english_ci = wilson_confidence_interval(english_score, known_word_count, confidence_level)
+    spanish_ci = wilson_confidence_interval(spanish_score, known_word_count, confidence_level)
+
+    return english_ci, spanish_ci
 
 
-# returns an int
-def count_sentence(array):
-    count = 0
-    for line in array:
-        count += line.count(". ")
-    return count
+def confidence(english_ci, spanish_ci):
+    e_conf = int(((english_ci[0] + english_ci[1]) / 2) * 100)
+    s_conf = int(((spanish_ci[0] + spanish_ci[1]) / 2) * 100)
+    return e_conf, s_conf
 
-
-# returns a dict
-def stop_words(array):
-    stop_words = {'the': 0, 'a': 0, 'some': 0, 'by': 0, 'any': 0, 'or': 0, 'and': 0}
-    for key in stop_words:
-        stop_words[key] = array[0].count(key)
-    return stop_words
-
-
-# returns a dict of spam words and their occurrences
-def find_spam(array, spam_array):
-    spam_dicts = {}
-    # create a dict for every spam word in order to be able to get counts of every word
-    for word in spam_array[0]:
-        spam_dicts[word] = array[0].count(word)
-    return spam_dicts
-
-
-def spam_warning(spam_dict):
-    for word in spam_dict:
-        print(word)
-        print(spam_dict[word])
-        if spam_dict[word] > 0:
-
-            return True
-
-
-def process_text(parent, array, spam_array):
-    # Check if spam has been set
-    if not spam_array:
-        error_box("The spam filter must have an entry and be set.")
-        return
-    if not array:
-        error_box("The text box must have a valid entry and be set.")
-        return
-    # Open new window
-    info = p.Toplevel(parent)
-    info.geometry("300x600")
-    info.title("Process results")
-
-    # Whitespace Count
-    whitespace = p.ttk.Label(info, text="Whitespaces:\t"+str(count_whitespace(raw_array)))
-    whitespace.pack()
-    # Sentence Count
-    sentence = p.ttk.Label(info, text="Sentence Count:\t"+str(count_sentence(raw_array)))
-    sentence.pack()
-    # Stop Words
-    p.ttk.Label(info, text="Stop Words:").pack()
-    stopwords = stop_words(array)
-    for word in stopwords:
-        p.ttk.Label(info, text=str(word)+": "+str(stopwords[word])).pack()
-    # Spam Words
-    p.ttk.Label(info, text='Spam Words:').pack()
-    spamwords = find_spam(array, spam_array)
-    for word in spamwords:
-        p.ttk.Label(info, text=str(word)+": "+str(spamwords[word])).pack()
-    print(spam_warning(spamwords))
-    if spam_warning(spamwords):
-        p.ttk.Label(info, text="Spam filter triggered. Possible Spam.").pack()
-    info.mainloop()
